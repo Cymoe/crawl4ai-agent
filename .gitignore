@@ -1,0 +1,13 @@
+# Virtual environment
+venv/
+__pycache__/
+
+# Environment variables and secrets
+.env
+credentials/
+client_secret.json
+token.json
+
+# IDE files
+.vscode/
+.idea/

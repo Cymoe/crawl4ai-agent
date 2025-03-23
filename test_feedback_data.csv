@@ -1,0 +1,6 @@
+Date,CustomerID,ServiceType,Rating,Feedback
+2025-03-20,CUST0001,Deep Clean,5,"Excellent service, very thorough"
+2025-03-20,CUST0002,Basic,4,"Good job overall, on time"
+2025-03-21,CUST0003,Recurring,5,"Best cleaning service I've used"
+2025-03-21,CUST0004,Move Out,3,"Missed some spots in bathroom"
+2025-03-22,CUST0005,Eco Clean,5,"Love the eco-friendly products"
