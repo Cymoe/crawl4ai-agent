@@ -1,5 +1,6 @@
 import streamlit as st
 from agents.pydantic_ai_expert import pydantic_ai_expert
+from agents import drive_watcher  # Import the drive_watcher instance
 import asyncio
 import os
 from typing import List, Dict, Any
@@ -14,6 +15,9 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_SERVICE_KEY")
 )
+
+# Start the DriveWatcher
+asyncio.create_task(drive_watcher.check_for_changes())
 
 async def get_embedding(text: str) -> List[float]:
     """Get embedding for text using OpenAI API."""
