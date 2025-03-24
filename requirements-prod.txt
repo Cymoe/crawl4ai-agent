@@ -6,3 +6,6 @@ aiohttp>=3.11.11
 beautifulsoup4>=4.12.3
 pandas>=2.2.3
 numpy>=1.26.4
+google-auth>=2.37.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.0.0
