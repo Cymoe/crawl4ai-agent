@@ -4,9 +4,7 @@ import json
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from .crawl_gdrive_docs import process_file
 
@@ -40,31 +38,21 @@ class DriveWatcher:
             print(f"Error saving processed files: {e}")
     
     def get_credentials(self):
-        """Initialize and return Google Drive credentials."""
-        creds = None
-        token_path = 'credentials/token.json'
-        
-        # Check if we have valid credentials
-        if os.path.exists(token_path):
-            try:
-                creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-            except Exception:
-                pass
-                
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'credentials/credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
+        """Initialize and return Google Drive credentials using service account."""
+        try:
+            # Get the service account key JSON from environment variable
+            service_account_info = json.loads(os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY', '{}'))
+            if not service_account_info:
+                raise ValueError("GOOGLE_SERVICE_ACCOUNT_KEY environment variable not set or invalid")
             
-            # Save the credentials for the next run
-            os.makedirs(os.path.dirname(token_path), exist_ok=True)
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
-                
-        return creds
+            creds = Credentials.from_service_account_info(
+                service_account_info,
+                scopes=SCOPES
+            )
+            return creds
+        except Exception as e:
+            print(f"Error getting credentials: {e}")
+            return None
     
     async def check_for_changes(self):
         """Check for new or modified files in the Drive folder."""
