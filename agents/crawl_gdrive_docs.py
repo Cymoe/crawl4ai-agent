@@ -258,6 +258,10 @@ async def process_file(service, file: Dict[str, str]):
             
             # Insert into database
             await insert_chunk(chunk)
+        
+        # Verify the file was stored
+        print("\nVerifying database storage...")
+        await list_gdrive_files()
             
     except Exception as e:
         print(f"Error processing file {name}: {e}")
@@ -410,6 +414,31 @@ async def insert_chunk(chunk: ProcessedChunk):
     except Exception as e:
         print(f"Error inserting chunk: {e}")
         raise e
+
+async def list_gdrive_files():
+    """List all Google Drive files stored in the database."""
+    print("\n=== Files in Database ===")
+    try:
+        response = supabase.table('site_pages').select('*').execute()
+        all_data = response.data
+        
+        # Filter to only gdrive files
+        gdrive_data = [
+            item for item in all_data 
+            if item.get('metadata', {}).get('source') == 'gdrive'
+        ]
+        
+        print(f"\nFound {len(gdrive_data)} Google Drive files:")
+        for item in gdrive_data:
+            print(f"\nFile: {item.get('title')}")
+            print(f"Type: {item.get('metadata', {}).get('type', 'unknown')}")
+            print(f"URL: {item.get('url')}")
+            print(f"Summary: {item.get('summary')}")
+            print("-" * 50)
+            
+    except Exception as e:
+        print(f"Error listing files: {e}")
+        print(f"Stack trace: {traceback.format_exc()}")
 
 async def main():
     """Main entry point."""
