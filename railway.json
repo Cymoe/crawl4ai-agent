@@ -5,7 +5,7 @@
     "buildCommand": "pip install -r requirements.txt"
   },
   "deploy": {
-    "startCommand": "./start.sh",
+    "startCommand": "streamlit run streamlit_ui.py --server.address=0.0.0.0 --server.port=${PORT:-8501}",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
