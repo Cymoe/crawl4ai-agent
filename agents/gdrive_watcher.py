@@ -12,7 +12,7 @@ from .crawl_gdrive_docs import process_file
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = '1PaIeRdrUefDcyrXSYQ-CJlNATIbDZhst'
 PROCESSED_FILES_PATH = 'processed_files.json'
-CHECK_INTERVAL = 300  # 5 minutes in seconds
+CHECK_INTERVAL = 30  # 30 seconds for testing
 
 class DriveWatcher:
     def __init__(self):
