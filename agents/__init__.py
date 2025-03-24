@@ -8,8 +8,9 @@ This package contains the following agents:
 4. PydanticAIExpert - Main RAG agent for queries
 """
 
-from .gdrive_watcher import DriveWatcher
-from .crawl_gdrive_docs import process_file
+# Temporarily disabled for initial deployment
+# from .gdrive_watcher import DriveWatcher
+# from .crawl_gdrive_docs import process_file
 from .crawl_pydantic_ai_docs import (
     crawl_pydantic_ai_docs,
     ProcessedChunk,
@@ -21,12 +22,6 @@ from .crawl_pydantic_ai_docs import (
 from .pydantic_ai_expert import pydantic_ai_expert
 
 __all__ = [
-    # Drive Watcher Agent
-    'DriveWatcher',
-    
-    # Document Processing Agent
-    'process_file',
-    
     # Web Crawler Agent
     'crawl_pydantic_ai_docs',
     'ProcessedChunk',
