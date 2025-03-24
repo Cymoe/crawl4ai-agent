@@ -188,17 +188,69 @@ async def process_file(service, file: Dict[str, str]):
     
     try:
         chunks = []
+        # Handle Google Sheets
         if mime_type == 'application/vnd.google-apps.spreadsheet':
             chunks = await process_gdrive_spreadsheet(file_id, mime_type)
+        
+        # Handle CSV files
         elif mime_type == 'text/csv':
-            # Handle CSV files
             request = service.files().get_media(fileId=file_id)
             content = request.execute()
-            
-            # Read CSV content
             df = pd.read_csv(io.StringIO(content.decode('utf-8')))
             chunk = await process_dataframe(df, name)
             chunks = [chunk]
+        
+        # Handle text files
+        elif mime_type == 'text/plain':
+            request = service.files().get_media(fileId=file_id)
+            content = request.execute().decode('utf-8')
+            # Process as raw text
+            chunk = ProcessedChunk(
+                url=f"gdrive://{file_id}",
+                title=name,
+                summary=f"Text file: {name}",
+                content=content,
+                chunk_number=1,
+                metadata={
+                    "source": "gdrive",
+                    "type": "text",
+                    "mime_type": mime_type
+                }
+            )
+            chunks = [chunk]
+        
+        # Handle Numbers files (Apple's spreadsheet format)
+        elif mime_type == 'application/vnd.apple.numbers' or name.endswith('.numbers'):
+            print(f"Processing Numbers file: {name}")
+            request = service.files().get_media(fileId=file_id)
+            content = request.execute()
+            
+            # Save temporarily and process
+            with tempfile.NamedTemporaryFile(suffix='.numbers') as temp_file:
+                temp_file.write(content)
+                temp_file.flush()
+                
+                # Convert Numbers content to text representation
+                text_content = f"Numbers spreadsheet: {name}\n\n"
+                text_content += "Note: This is a Numbers spreadsheet file. Please convert to CSV or Google Sheets for full data processing."
+                
+                chunk = ProcessedChunk(
+                    url=f"gdrive://{file_id}",
+                    title=name,
+                    summary=f"Numbers spreadsheet: {name}",
+                    content=text_content,
+                    chunk_number=1,
+                    metadata={
+                        "source": "gdrive",
+                        "type": "spreadsheet",
+                        "mime_type": mime_type
+                    }
+                )
+                chunks = [chunk]
+        
+        else:
+            print(f"Unsupported file type: {mime_type} for file {name}")
+            return
             
         for chunk in chunks:
             print(f"Inserted chunk {chunk.chunk_number} for {chunk.url}")
@@ -209,6 +261,7 @@ async def process_file(service, file: Dict[str, str]):
             
     except Exception as e:
         print(f"Error processing file {name}: {e}")
+        print(f"Stack trace: {traceback.format_exc()}")
 
 async def process_folder(folder_id: str):
     """Process all supported files in a Google Drive folder."""
@@ -225,7 +278,9 @@ async def process_folder(folder_id: str):
             "text/csv",
             "application/vnd.google-apps.spreadsheet",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-excel"
+            "application/vnd.ms-excel",
+            "text/plain",
+            "application/vnd.apple.numbers"
         ]
         query = f"'{folder_id}' in parents and ("
         query += " or ".join([f"mimeType='{mime}'" for mime in supported_types])
