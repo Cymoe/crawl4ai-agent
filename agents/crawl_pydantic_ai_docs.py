@@ -1,5 +1,4 @@
-# Connect to your server using the IP address shown (5.161.41.42)
-ssh root@5.161.41.42import os
+import os
 import sys
 import json
 import asyncio
