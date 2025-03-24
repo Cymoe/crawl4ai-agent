@@ -1,1 +1,1 @@
-web: streamlit run streamlit_ui.py --server.address=0.0.0.0 --server.port=8501
+web: python railway_start.py
