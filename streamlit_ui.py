@@ -271,6 +271,34 @@ async def main():
     st.title("AMS Clean Assistant")
     st.write("Ask me anything about AMS Clean's data and documents.")
     
+    # Add sidebar to display available files
+    with st.sidebar:
+        st.header("Available Files")
+        st.write("The following files are available for querying:")
+        
+        try:
+            # Get all Google Drive files from the database
+            response = supabase.table('site_pages').select('*').execute()
+            all_data = response.data
+            
+            # Filter to only gdrive files
+            gdrive_data = [
+                item for item in all_data 
+                if item.get('metadata', {}).get('source') == 'gdrive'
+            ]
+            
+            # Display files in the sidebar
+            for item in gdrive_data:
+                file_name = item.get('metadata', {}).get('file_name', item.get('title', 'Unknown'))
+                file_type = item.get('metadata', {}).get('type', 'unknown')
+                st.write(f"📄 **{file_name}** ({file_type})")
+                
+            st.write("---")
+            st.write("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
+        except Exception as e:
+            st.error(f"Error loading files: {str(e)}")
+    
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
