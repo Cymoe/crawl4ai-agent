@@ -14,6 +14,7 @@ from googleapiclient.errors import HttpError
 import io
 import csv
 import sys
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -38,6 +39,9 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_SERVICE_KEY")
 )
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Google Drive API setup
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
@@ -69,51 +73,48 @@ def build_service():
     
     return build('drive', 'v3', credentials=creds)
 
-async def process_gdrive_spreadsheet(file_id: str, mime_type: str) -> List[ProcessedChunk]:
+async def process_gdrive_spreadsheet(service, file_id: str, name: str) -> List[ProcessedChunk]:
     """Process a Google Drive spreadsheet."""
     chunks = []
-    service = build_service()
-    
     try:
-        if mime_type == 'application/vnd.google-apps.spreadsheet':
-            # Download the spreadsheet
-            print(f"Processing Google Sheet: {file_id}")
-            spreadsheet = service.files().get(fileId=file_id).execute()
-            
-            # Get the spreadsheet as CSV
-            request = service.files().export_media(fileId=file_id, mimeType='text/csv')
-            content = request.execute()
-            
-            # Save to temp file
-            print("Successfully downloaded spreadsheet")
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.csv')
-            temp_file.write(content)
-            temp_file.close()
-            print("Saved to temp file")
-            
-            # Read with pandas
-            df = pd.read_csv(temp_file.name)
-            os.unlink(temp_file.name)
-            
-            # Process each sheet
-            print(f"Found sheets: {[spreadsheet.get('name', 'Sheet1')]}")
-            sheet_name = spreadsheet.get('name', 'Sheet1')
-            print(f"\nProcessing sheet: {sheet_name}")
-            
-            # Get sheet info
-            print(f"Sheet {sheet_name} has {len(df)} rows and columns: {df.columns.tolist()}")
-            
-            # Process the dataframe
-            chunk = await process_dataframe(df, sheet_name)
-            chunks.append(chunk)
-            
-            print(f"Processed {len(chunks)} sheets")
-            
-        return chunks
+        # Download the spreadsheet
+        print(f"Processing Google Sheet: {file_id}")
+        spreadsheet = service.files().get(fileId=file_id).execute()
+        
+        # Get the spreadsheet as CSV
+        request = service.files().export_media(fileId=file_id, mimeType='text/csv')
+        content = request.execute()
+        
+        # Save to temp file
+        print("Successfully downloaded spreadsheet")
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.csv')
+        temp_file.write(content)
+        temp_file.close()
+        print("Saved to temp file")
+        
+        # Read with pandas
+        df = pd.read_csv(temp_file.name)
+        os.unlink(temp_file.name)
+        
+        # Process each sheet
+        print(f"Found sheets: {[spreadsheet.get('name', 'Sheet1')]}")
+        sheet_name = spreadsheet.get('name', 'Sheet1')
+        print(f"\nProcessing sheet: {sheet_name}")
+        
+        # Get sheet info
+        print(f"Sheet {sheet_name} has {len(df)} rows and columns: {df.columns.tolist()}")
+        
+        # Process the dataframe
+        chunk = await process_dataframe(df, name)
+        chunks.append(chunk)
+        
+        print(f"Processed {len(chunks)} sheets")
         
     except Exception as e:
         print(f"Error processing spreadsheet: {e}")
         return []
+        
+    return chunks
 
 async def process_dataframe(df: pd.DataFrame, file_name: str) -> ProcessedChunk:
     """Process a dataframe into a chunk."""
@@ -178,100 +179,253 @@ async def process_dataframe(df: pd.DataFrame, file_name: str) -> ProcessedChunk:
         embedding=None  # Will be added later
     )
 
-async def process_file(service, file: Dict[str, str]):
-    """Process a single file from Google Drive."""
-    file_id = file['id']
-    mime_type = file['mimeType']
-    name = file['name']
-    
-    print(f"- {name} ({mime_type})")
-    
+async def process_file(service, file):
+    """Process a file from Google Drive."""
     try:
+        file_id = file['id']
+        name = file['name']
+        mime_type = file.get('mimeType', 'unknown')
+        
+        logger.info(f"Processing file: {name} (ID: {file_id})")
+        logger.info(f"MIME type: {mime_type}")
+        
         chunks = []
+        
         # Handle Google Sheets
         if mime_type == 'application/vnd.google-apps.spreadsheet':
-            chunks = await process_gdrive_spreadsheet(file_id, mime_type)
+            logger.info(f"Processing Google Sheet: {name}")
+            await process_gdrive_spreadsheet(service, file_id, name)
+            return
         
         # Handle CSV files
-        elif mime_type == 'text/csv':
-            request = service.files().get_media(fileId=file_id)
-            content = request.execute()
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
-            chunk = await process_dataframe(df, name)
-            chunks = [chunk]
-        
-        # Handle text files
-        elif mime_type == 'text/plain':
+        elif mime_type == 'text/csv' or name.lower().endswith('.csv'):
+            logger.info(f"Processing CSV file: {name}")
+            
+            # Download the file
             request = service.files().get_media(fileId=file_id)
             content = request.execute().decode('utf-8')
-            # Process as raw text
-            chunk = ProcessedChunk(
-                url=f"gdrive://{file_id}",
-                title=name,
-                summary=f"Text file: {name}",
-                content=content,
-                chunk_number=1,
-                metadata={
-                    "source": "gdrive",
-                    "type": "text",
-                    "file_name": name,
-                    "file_type": "text",
-                    "file_id": file_id,
-                    "mime_type": mime_type
-                }
-            )
-            chunks = [chunk]
-        
-        # Handle Numbers files (Apple's spreadsheet format)
-        elif mime_type == 'application/vnd.apple.numbers' or name.endswith('.numbers'):
-            print(f"Processing Numbers file: {name}")
-            request = service.files().get_media(fileId=file_id)
-            content = request.execute()
             
-            # Save temporarily and process
-            with tempfile.NamedTemporaryFile(suffix='.numbers') as temp_file:
-                temp_file.write(content)
-                temp_file.flush()
+            # Parse CSV data
+            try:
+                reader = csv.reader(content.splitlines())
+                rows = list(reader)
                 
-                # Convert Numbers content to text representation
-                text_content = f"Numbers spreadsheet: {name}\n\n"
-                text_content += "Note: This is a Numbers spreadsheet file. Please convert to CSV or Google Sheets for full data processing."
+                if not rows:
+                    logger.warning(f"CSV file {name} is empty")
+                    return
                 
+                headers = rows[0]
+                data_rows = rows[1:] if len(rows) > 1 else []
+                
+                # Determine file type from name
+                file_type = "unknown"
+                if "customer" in name.lower():
+                    file_type = "customers"
+                elif "transaction" in name.lower():
+                    file_type = "transactions"
+                elif "geographic" in name.lower() or "geo" in name.lower():
+                    file_type = "geographical"
+                elif "operation" in name.lower() or "ops" in name.lower():
+                    file_type = "operations"
+                elif "service" in name.lower() or "package" in name.lower():
+                    file_type = "service_packages"
+                elif "revenue" in name.lower() or "metric" in name.lower():
+                    file_type = "revenue_metrics"
+                elif "clean" in name.lower() or "company" in name.lower():
+                    file_type = "cleaning_company"
+                
+                # Create summary
+                summary = f"Data from {name} with {len(data_rows)} rows and {len(headers)} columns"
+                
+                # Create content
+                content = f"File: {name}\nType: {file_type}\n\nHeaders: {', '.join(headers)}\n\nSample Data:\n"
+                for i, row in enumerate(data_rows[:5]):  # Include up to 5 rows as sample
+                    content += f"Row {i+1}: {', '.join(row)}\n"
+                
+                # Add full data representation
+                content += "\nFull Data:\n"
+                for i, row in enumerate(data_rows):
+                    row_data = []
+                    for j, cell in enumerate(row):
+                        if j < len(headers):
+                            row_data.append(f"{headers[j]}: {cell}")
+                        else:
+                            row_data.append(f"Column {j+1}: {cell}")
+                    content += f"Row {i+1}: {', '.join(row_data)}\n"
+                
+                # Create chunk
                 chunk = ProcessedChunk(
-                    url=f"gdrive://{file_id}",
+                    url=f"gdrive://{name}",
                     title=name,
-                    summary=f"Numbers spreadsheet: {name}",
-                    content=text_content,
+                    summary=summary,
+                    content=content,
+                    chunk_number=1,
+                    metadata={
+                        "type": file_type,
+                        "source": "gdrive",
+                        "file_name": name,
+                        "file_type": "spreadsheet"
+                    }
+                )
+                chunks = [chunk]
+                
+            except Exception as e:
+                logger.error(f"Error processing CSV file {name}: {e}")
+                logger.error(traceback.format_exc())
+                # Create a simple chunk with error information
+                chunk = ProcessedChunk(
+                    url=f"gdrive://{name}",
+                    title=name,
+                    summary=f"Error processing CSV file: {name}",
+                    content=f"Error processing CSV file: {name}\nError: {str(e)}",
+                    chunk_number=1,
+                    metadata={
+                        "type": "error",
+                        "source": "gdrive",
+                        "file_name": name,
+                        "file_type": "spreadsheet",
+                        "error": str(e)
+                    }
+                )
+                chunks = [chunk]
+        
+        # Handle text files
+        elif mime_type == 'text/plain' or name.lower().endswith('.txt'):
+            logger.info(f"Processing text file: {name}")
+            try:
+                request = service.files().get_media(fileId=file_id)
+                content = request.execute().decode('utf-8')
+                
+                # Determine file type from name
+                file_type = "text"
+                if "clean" in name.lower() or "company" in name.lower():
+                    file_type = "cleaning_company"
+                
+                # Process as raw text
+                chunk = ProcessedChunk(
+                    url=f"gdrive://{name}",
+                    title=name,
+                    summary=f"Text file: {name}",
+                    content=content,
                     chunk_number=1,
                     metadata={
                         "source": "gdrive",
-                        "type": "spreadsheet",
+                        "type": file_type,
                         "file_name": name,
-                        "file_type": "spreadsheet",
+                        "file_type": "text",
                         "file_id": file_id,
                         "mime_type": mime_type
                     }
                 )
                 chunks = [chunk]
+            except Exception as e:
+                logger.error(f"Error processing text file {name}: {e}")
+                logger.error(traceback.format_exc())
+                chunk = ProcessedChunk(
+                    url=f"gdrive://{name}",
+                    title=name,
+                    summary=f"Error processing text file: {name}",
+                    content=f"Error processing text file: {name}\nError: {str(e)}",
+                    chunk_number=1,
+                    metadata={
+                        "type": "error",
+                        "source": "gdrive",
+                        "file_name": name,
+                        "file_type": "text",
+                        "error": str(e)
+                    }
+                )
+                chunks = [chunk]
+        
+        # Handle Numbers files (Apple's spreadsheet format)
+        elif mime_type == 'application/vnd.apple.numbers' or name.lower().endswith('.numbers'):
+            logger.info(f"Processing Numbers file: {name}")
+            try:
+                request = service.files().get_media(fileId=file_id)
+                content = request.execute()
+                
+                # Save temporarily and process
+                with tempfile.NamedTemporaryFile(suffix='.numbers') as temp_file:
+                    temp_file.write(content)
+                    temp_file.flush()
+                    
+                    # Convert Numbers content to text representation
+                    text_content = f"Numbers spreadsheet: {name}\n\n"
+                    text_content += "Note: This is a Numbers spreadsheet file. Please convert to CSV or Google Sheets for full data processing."
+                    
+                    # Determine file type from name
+                    file_type = "spreadsheet"
+                    if "test" in name.lower() or "metric" in name.lower():
+                        file_type = "test_metrics"
+                    
+                    chunk = ProcessedChunk(
+                        url=f"gdrive://{name}",
+                        title=name,
+                        summary=f"Numbers spreadsheet: {name}",
+                        content=text_content,
+                        chunk_number=1,
+                        metadata={
+                            "source": "gdrive",
+                            "type": file_type,
+                            "file_name": name,
+                            "file_type": "spreadsheet",
+                            "file_id": file_id,
+                            "mime_type": mime_type
+                        }
+                    )
+                    chunks = [chunk]
+            except Exception as e:
+                logger.error(f"Error processing Numbers file {name}: {e}")
+                logger.error(traceback.format_exc())
+                chunk = ProcessedChunk(
+                    url=f"gdrive://{name}",
+                    title=name,
+                    summary=f"Error processing Numbers file: {name}",
+                    content=f"Error processing Numbers file: {name}\nError: {str(e)}",
+                    chunk_number=1,
+                    metadata={
+                        "type": "error",
+                        "source": "gdrive",
+                        "file_name": name,
+                        "file_type": "spreadsheet",
+                        "error": str(e)
+                    }
+                )
+                chunks = [chunk]
         
         else:
-            print(f"Unsupported file type: {mime_type} for file {name}")
-            return
+            logger.warning(f"Unsupported file type: {mime_type} for file {name}")
+            # Create a simple chunk with file information
+            chunk = ProcessedChunk(
+                url=f"gdrive://{name}",
+                title=name,
+                summary=f"Unsupported file type: {mime_type}",
+                content=f"File {name} has unsupported type: {mime_type}",
+                chunk_number=1,
+                metadata={
+                    "type": "unsupported",
+                    "source": "gdrive",
+                    "file_name": name,
+                    "file_type": "unsupported",
+                    "mime_type": mime_type
+                }
+            )
+            chunks = [chunk]
             
         for chunk in chunks:
-            print(f"Inserted chunk {chunk.chunk_number} for {chunk.url}")
-            print(f"Processed chunk {chunk.chunk_number} for file {name}")
+            logger.info(f"Inserting chunk {chunk.chunk_number} for {chunk.url}")
             
             # Insert into database
             await insert_chunk(chunk)
         
         # Verify the file was stored
-        print("\nVerifying database storage...")
+        logger.info("Verifying database storage...")
         await list_gdrive_files()
             
     except Exception as e:
-        print(f"Error processing file {name}: {e}")
-        print(f"Stack trace: {traceback.format_exc()}")
+        logger.error(f"Error processing file {file.get('name', 'unknown')}: {e}")
+        logger.error(traceback.format_exc())
+        raise  # Re-raise to allow caller to handle
 
 async def process_folder(folder_id: str):
     """Process all supported files in a Google Drive folder."""
