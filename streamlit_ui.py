@@ -53,15 +53,50 @@ async def get_embedding(text: str) -> List[float]:
     return response.data[0].embedding
 
 async def search_data(query: str) -> List[Dict[str, Any]]:
-    """Search for relevant data in Supabase."""
-    embedding = await get_embedding(query)
-    
+    """Search for relevant data in Supabase using vector similarity."""
     try:
-        # First, let's check what data exists
-        print("\n=== Checking Database Content ===")
+        # Generate embedding for the query
+        embedding = await get_embedding(query)
+        
+        print("\n=== Searching Database with Vector Similarity ===")
+        print(f"Query: {query}")
+        
+        # Use Supabase's vector similarity search with the embedding
+        # This will find documents that are semantically similar to the query
+        try:
+            response = supabase.rpc(
+                'match_site_pages',  
+                {
+                    'query_embedding': embedding,
+                    'match_threshold': 0.5,  
+                    'match_count': 10        
+                }
+            ).execute()
+            
+            # Check if we got any results
+            if response.data and len(response.data) > 0:
+                results = response.data
+                print(f"Found {len(results)} documents through vector similarity")
+                
+                # Log the results for debugging
+                for result in results:
+                    print(f"\n--- Document ---")
+                    print(f"Title: {result.get('title')}")
+                    print(f"Type: {result.get('metadata', {}).get('type')}")
+                    print(f"Content Preview: {result.get('content')[:100]}...")
+                
+                return results
+            else:
+                print("No vector matches found, falling back to keyword search")
+                # Continue to fallback method
+        except Exception as e:
+            print(f"Vector search error: {e}")
+            print("Falling back to keyword search")
+            # Continue to fallback method
+        
+        # Fallback: Get all documents and filter
         response = supabase.table('site_pages').select('*').execute()
         all_data = response.data
-        print(f"Total records found: {len(all_data)}")
         
         # Filter to only gdrive files
         gdrive_data = [
@@ -69,7 +104,7 @@ async def search_data(query: str) -> List[Dict[str, Any]]:
             if item.get('metadata', {}).get('source') == 'gdrive'
         ]
         
-        print(f"\nFound {len(gdrive_data)} gdrive documents")
+        print(f"Found {len(gdrive_data)} gdrive documents")
         
         # If asking about metrics, prioritize revenue metrics data
         metrics = ['mrr', 'revenue', 'churn', 'customers', 'cac', 'ltv']
@@ -81,14 +116,28 @@ async def search_data(query: str) -> List[Dict[str, Any]]:
             if not results:  # If no revenue metrics found, use all gdrive data
                 results = gdrive_data
         else:
-            results = gdrive_data
+            # Use simple keyword matching as fallback
+            query_terms = query.lower().split()
+            results = []
+            
+            for item in gdrive_data:
+                content = item.get('content', '').lower()
+                title = item.get('title', '').lower()
+                # Check if any query term appears in content or title
+                if any(term in content or term in title for term in query_terms):
+                    results.append(item)
+            
+            # If still no results, return all gdrive data
+            if not results:
+                results = gdrive_data
         
+        # Log the results for debugging
         print(f"\nReturning {len(results)} relevant documents")
         for result in results:
             print(f"\n--- Document ---")
             print(f"Title: {result.get('title')}")
             print(f"Type: {result.get('metadata', {}).get('type')}")
-            print(f"Content Preview: {result.get('content')[:200]}...")
+            print(f"Content Preview: {result.get('content')[:100]}...")
         
         return results
     except Exception as e:
@@ -291,7 +340,7 @@ async def main():
             for item in gdrive_data:
                 file_name = item.get('metadata', {}).get('file_name', item.get('title', 'Unknown'))
                 file_type = item.get('metadata', {}).get('type', 'unknown')
-                st.write(f"📄 **{file_name}** ({file_type})")
+                st.write(f" **{file_name}** ({file_type})")
                 
             st.write("---")
             st.write("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"))
