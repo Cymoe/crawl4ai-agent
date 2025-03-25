@@ -214,6 +214,9 @@ async def process_file(service, file: Dict[str, str]):
                 metadata={
                     "source": "gdrive",
                     "type": "text",
+                    "file_name": name,
+                    "file_type": "text",
+                    "file_id": file_id,
                     "mime_type": mime_type
                 }
             )
@@ -243,6 +246,9 @@ async def process_file(service, file: Dict[str, str]):
                     metadata={
                         "source": "gdrive",
                         "type": "spreadsheet",
+                        "file_name": name,
+                        "file_type": "spreadsheet",
+                        "file_id": file_id,
                         "mime_type": mime_type
                     }
                 )
@@ -420,20 +426,6 @@ async def delete_file_from_database(file_id: str, file_name: str = None):
     try:
         print(f"Deleting file with ID {file_id} from database")
         
-        # If we have the file name, we can try to delete by URL directly
-        if file_name:
-            url_pattern = f"gdrive://{file_name}"
-            print(f"Searching for URL pattern: {url_pattern}")
-            response = supabase.table('site_pages').select('id').eq('url', url_pattern).execute()
-            
-            if response.data:
-                for record in response.data:
-                    # Delete each matching record
-                    delete_response = supabase.table('site_pages').delete().eq('id', record['id']).execute()
-                    print(f"Deleted record with ID {record['id']}")
-                return
-        
-        # If we don't have the file name or didn't find a match, try to find by metadata
         # Get all gdrive files
         response = supabase.table('site_pages').select('*').execute()
         all_data = response.data
@@ -444,18 +436,48 @@ async def delete_file_from_database(file_id: str, file_name: str = None):
             if item.get('metadata', {}).get('source') == 'gdrive'
         ]
         
-        # Look for files with matching file_id in metadata
         deleted = False
+        
+        # First try to find by file_id in metadata
         for item in gdrive_data:
             metadata = item.get('metadata', {})
             if metadata.get('file_id') == file_id:
                 # Delete the record
                 delete_response = supabase.table('site_pages').delete().eq('id', item['id']).execute()
-                print(f"Deleted record with ID {item['id']}")
+                print(f"Deleted record with ID {item['id']} by file_id")
                 deleted = True
         
+        # If not found and we have a file name, try by file name
+        if not deleted and file_name:
+            for item in gdrive_data:
+                metadata = item.get('metadata', {})
+                if metadata.get('file_name') == file_name:
+                    # Delete the record
+                    delete_response = supabase.table('site_pages').delete().eq('id', item['id']).execute()
+                    print(f"Deleted record with ID {item['id']} by file_name")
+                    deleted = True
+        
+        # Last resort: try by URL
+        if not deleted and file_name:
+            url_pattern = f"gdrive://{file_name}"
+            for item in gdrive_data:
+                if item.get('url') == url_pattern:
+                    # Delete the record
+                    delete_response = supabase.table('site_pages').delete().eq('id', item['id']).execute()
+                    print(f"Deleted record with ID {item['id']} by URL")
+                    deleted = True
+        
+        # If we still haven't found it, try the title
+        if not deleted and file_name:
+            for item in gdrive_data:
+                if item.get('title') == file_name:
+                    # Delete the record
+                    delete_response = supabase.table('site_pages').delete().eq('id', item['id']).execute()
+                    print(f"Deleted record with ID {item['id']} by title")
+                    deleted = True
+        
         if not deleted:
-            print(f"No records found for file ID {file_id}")
+            print(f"No records found for file ID {file_id} or name {file_name}")
             
     except Exception as e:
         print(f"Error deleting file from database: {e}")
