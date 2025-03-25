@@ -10,7 +10,7 @@ This package contains the following agents:
 
 from .gdrive_watcher import DriveWatcher
 from .crawl_gdrive_docs import process_gdrive_spreadsheet, process_folder
-from .crawl_pydantic_ai_docs import process_pydantic_docs, chunk_text, crawl_pydantic_ai_docs, ProcessedChunk, insert_chunk, process_chunk, get_embedding
+from .crawl_pydantic_ai_docs import chunk_text, crawl_pydantic_ai_docs, ProcessedChunk, insert_chunk, process_chunk, get_embedding
 from .pydantic_ai_expert import pydantic_ai_expert
 
 # Initialize the DriveWatcher
@@ -19,17 +19,15 @@ drive_watcher = DriveWatcher()
 __all__ = [
     # Web Crawler Agent
     'crawl_pydantic_ai_docs',
-    'ProcessedChunk',
     'chunk_text',
     'insert_chunk',
     'process_chunk',
     'get_embedding',
-    'process_pydantic_docs',
+    
     # RAG Expert Agent
     'pydantic_ai_expert',
     # Drive Watcher Agent
     'DriveWatcher',
-    'process_file',
     'process_gdrive_spreadsheet',
     'process_folder',
     'drive_watcher',
