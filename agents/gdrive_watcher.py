@@ -63,9 +63,14 @@ class DriveWatcher:
                 logger.error("Error: GOOGLE_SERVICE_ACCOUNT_KEY environment variable not set")
                 return None
             
-            # Decode the base64-encoded service account key
+            # Try to parse as JSON first (for raw JSON keys)
             try:
-                service_account_info = json.loads(base64.b64decode(service_account_key))
+                # Check if the key starts with { which indicates it's a raw JSON
+                if service_account_key.strip().startswith('{'):
+                    service_account_info = json.loads(service_account_key)
+                else:
+                    # Otherwise, assume it's base64-encoded
+                    service_account_info = json.loads(base64.b64decode(service_account_key))
             except Exception as e:
                 logger.error(f"Error decoding service account key: {e}")
                 return None

@@ -7,6 +7,10 @@ from openai import AsyncOpenAI
 from supabase import create_client, Client
 import traceback
 import pandas as pd
+from fastapi import FastAPI
+from fastapi.middleware.wsgi import WSGIMiddleware
+import uvicorn
+from starlette.responses import JSONResponse
 
 # Initialize OpenAI and Supabase clients
 openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -14,6 +18,31 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_SERVICE_KEY")
 )
+
+# Create a FastAPI app
+api = FastAPI()
+
+# Add API endpoints
+@api.get("/api/check_database")
+async def check_database():
+    """API endpoint to check the database."""
+    try:
+        response = supabase.table('site_pages').select('*').execute()
+        all_data = response.data
+        
+        # Filter to only gdrive files
+        gdrive_data = [
+            item for item in all_data 
+            if item.get('metadata', {}).get('source') == 'gdrive'
+        ]
+        
+        return gdrive_data
+    except Exception as e:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "traceback": traceback.format_exc()}
+        )
 
 async def get_embedding(text: str) -> List[float]:
     """Get embedding for text using OpenAI API."""
@@ -156,25 +185,24 @@ def calculate_metrics(df: pd.DataFrame, query_type: str = None) -> str:
 
 async def get_assistant_response(query: str, context: List[Dict[str, Any]]) -> str:
     """Get assistant response using OpenAI."""
-    system_prompt = """You are AMS Clean Assistant, a data analyst for AMS Clean. 
-    Your role is to help answer questions about company data and documents.
+    system_prompt = """You are an AI assistant that helps users understand their business data. 
+    You will be given context from various data sources, and your task is to answer the user's question based on this context.
     
-    When analyzing data:
-    1. Focus on providing clear, direct answers with specific numbers
-    2. Format monetary values with $ and commas (e.g. $1,234.56)
-    3. Format percentages with % sign (e.g. 12.3%)
-    4. If asked to perform calculations:
-       - Show the formula being used (if applicable)
-       - List out the values being calculated
-       - Show the step-by-step calculation
-       - Present the final result clearly
-    5. If data is missing or unclear, say so directly
+    If the information is not present in the context, say that you don't have enough information to answer.
+    Do not make up information that is not in the context.
+    
+    When analyzing data, provide insights that would be valuable for business decision-making.
+    If appropriate, suggest follow-up questions that might help the user gain deeper insights.
     
     Remember to maintain a professional but friendly tone."""
     
     # Format context for the prompt, being selective about content
     formatted_context = ""
     dataframes = {}  # Store processed dataframes for calculations
+    
+    # Limit the number of context items to prevent token overflow
+    max_context_items = 5
+    context = context[:max_context_items]
     
     for item in context:
         content = item.get('content', '')
@@ -184,8 +212,12 @@ async def get_assistant_response(query: str, context: List[Dict[str, Any]]) -> s
         if df is not None:
             dataframes[item.get('title', 'unknown')] = df
         
-        # Extract only relevant parts of the content
+        # Extract only relevant parts of the content and limit its size
         relevant_content = extract_relevant_content(content, query)
+        # Limit content size to prevent token overflow
+        if len(relevant_content) > 1000:
+            relevant_content = relevant_content[:1000] + "... [content truncated]"
+            
         formatted_context += f"\nSource: {item.get('metadata', {}).get('file_name', 'Unknown')}\n"
         formatted_context += f"Content:\n{relevant_content}\n"
         formatted_context += "---\n"
@@ -215,14 +247,25 @@ async def get_assistant_response(query: str, context: List[Dict[str, Any]]) -> s
         {"role": "user", "content": f"Here is the relevant context:\n\n{formatted_context}\n\nQuestion: {query}"}
     ]
     
-    response = await openai_client.chat.completions.create(
-        model="gpt-4",
-        messages=messages,
-        temperature=0.2,
-        max_tokens=500
-    )
+    # Get model from environment variables or use a default
+    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
     
-    return response.choices[0].message.content
+    try:
+        response = await openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error calling OpenAI API: {str(e)}")
+        return f"I encountered an error processing your request. Please try again with a simpler query or less data. Error details: {str(e)[:100]}..."
+
+def run_api():
+    """Run the FastAPI app."""
+    app = WSGIMiddleware(api)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 async def main():
     st.title("AMS Clean Assistant")
@@ -255,6 +298,12 @@ async def main():
                 
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
+
+    # Start the API server in a separate thread
+    import threading
+    api_thread = threading.Thread(target=run_api)
+    api_thread.daemon = True
+    api_thread.start()
 
 if __name__ == "__main__":
     asyncio.run(main())

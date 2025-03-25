@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import tempfile
+import traceback
 from typing import List, Dict, Any, Tuple
 import pandas as pd
 import numpy as np
@@ -27,7 +28,8 @@ from supabase import create_client, Client
 from .crawl_pydantic_ai_docs import (
     ProcessedChunk,
     chunk_text,
-    insert_chunk
+    insert_chunk,
+    get_embedding  # Import the get_embedding function
 )
 
 # Load environment variables
@@ -169,6 +171,9 @@ async def process_dataframe(df: pd.DataFrame, file_name: str) -> ProcessedChunk:
     print(f"URL: gdrive://{file_name}")
     print(f"Metadata: {metadata}")
     
+    # Generate embedding
+    embedding = await get_embedding(content)
+    
     return ProcessedChunk(
         title=file_name,
         url=f"gdrive://{file_name}",
@@ -176,7 +181,7 @@ async def process_dataframe(df: pd.DataFrame, file_name: str) -> ProcessedChunk:
         metadata=metadata,
         summary=summary,
         chunk_number=0,
-        embedding=None  # Will be added later
+        embedding=embedding
     )
 
 async def process_file(service, file):
@@ -194,8 +199,8 @@ async def process_file(service, file):
         # Handle Google Sheets
         if mime_type == 'application/vnd.google-apps.spreadsheet':
             logger.info(f"Processing Google Sheet: {name}")
-            await process_gdrive_spreadsheet(service, file_id, name)
-            return
+            chunks = await process_gdrive_spreadsheet(service, file_id, name)
+            # return
         
         # Handle CSV files
         elif mime_type == 'text/csv' or name.lower().endswith('.csv'):
@@ -259,6 +264,7 @@ async def process_file(service, file):
                     title=name,
                     summary=summary,
                     content=content,
+                    embedding=await get_embedding(content),
                     chunk_number=1,
                     metadata={
                         "type": file_type,
@@ -307,6 +313,7 @@ async def process_file(service, file):
                     title=name,
                     summary=f"Text file: {name}",
                     content=content,
+                    embedding=await get_embedding(content),
                     chunk_number=1,
                     metadata={
                         "source": "gdrive",
@@ -326,6 +333,7 @@ async def process_file(service, file):
                     title=name,
                     summary=f"Error processing text file: {name}",
                     content=f"Error processing text file: {name}\nError: {str(e)}",
+                    embedding=await get_embedding(f"Error processing text file: {name}\nError: {str(e)}"),
                     chunk_number=1,
                     metadata={
                         "type": "error",
@@ -363,6 +371,7 @@ async def process_file(service, file):
                         title=name,
                         summary=f"Numbers spreadsheet: {name}",
                         content=text_content,
+                        embedding=await get_embedding(text_content),
                         chunk_number=1,
                         metadata={
                             "source": "gdrive",
@@ -382,6 +391,7 @@ async def process_file(service, file):
                     title=name,
                     summary=f"Error processing Numbers file: {name}",
                     content=f"Error processing Numbers file: {name}\nError: {str(e)}",
+                    embedding=await get_embedding(f"Error processing Numbers file: {name}\nError: {str(e)}"),
                     chunk_number=1,
                     metadata={
                         "type": "error",
@@ -401,6 +411,7 @@ async def process_file(service, file):
                 title=name,
                 summary=f"Unsupported file type: {mime_type}",
                 content=f"File {name} has unsupported type: {mime_type}",
+                embedding=await get_embedding(f"File {name} has unsupported type: {mime_type}"),
                 chunk_number=1,
                 metadata={
                     "type": "unsupported",
@@ -504,14 +515,19 @@ async def debug_database():
         print(f"Embedding present: {'Yes' if doc.get('embedding') else 'No'}")
 
 async def get_embedding(text: str) -> List[float]:
-    """Get embedding for text using OpenAI API."""
-    openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-    text = text.replace("\n", " ")
-    result = await openai_client.embeddings.create(
-        input=[text],
-        model="text-embedding-3-small"
-    )
-    return result.data[0].embedding
+    """Get embedding vector from OpenAI."""
+    try:
+        text = text.replace("\n", " ")  # Normalize text
+        client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        response = await client.embeddings.create(
+            model="text-embedding-3-small",
+            input=text,
+            timeout=30.0  # Increase timeout
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        logger.error(f"Error getting embedding: {str(e)}")
+        return [0.0] * 1536  # Return zero vector on failure
 
 async def get_title_and_summary(text: str, url: str) -> Tuple[str, str]:
     """Get a title and summary for a chunk of text."""
