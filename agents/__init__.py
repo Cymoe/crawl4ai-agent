@@ -9,12 +9,12 @@ This package contains the following agents:
 """
 
 from .gdrive_watcher import DriveWatcher
-from .crawl_gdrive_docs import process_gdrive_spreadsheet, process_folder
+from .crawl_gdrive_docs import process_gdrive_spreadsheet, process_folder, delete_file_from_database
 from .crawl_pydantic_ai_docs import chunk_text, crawl_pydantic_ai_docs, ProcessedChunk, insert_chunk, process_chunk, get_embedding
 from .pydantic_ai_expert import pydantic_ai_expert
 
-# Initialize the DriveWatcher
-drive_watcher = DriveWatcher()
+# Note: We don't initialize DriveWatcher here anymore
+# It should be initialized in run_watcher.py to avoid multiple instances
 
 __all__ = [
     # Web Crawler Agent
@@ -30,5 +30,5 @@ __all__ = [
     'DriveWatcher',
     'process_gdrive_spreadsheet',
     'process_folder',
-    'drive_watcher',
+    'delete_file_from_database',
 ]
