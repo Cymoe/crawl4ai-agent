@@ -1,6 +1,6 @@
 import streamlit as st
 from agents.pydantic_ai_expert import pydantic_ai_expert
-from agents import drive_watcher  # Import the drive_watcher instance
+from agents import drive_watcher
 import asyncio
 import os
 from typing import List, Dict, Any
@@ -15,9 +15,6 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_SERVICE_KEY")
 )
-
-# Start the DriveWatcher
-asyncio.create_task(drive_watcher.check_for_changes())
 
 async def get_embedding(text: str) -> List[float]:
     """Get embedding for text using OpenAI API."""
@@ -161,7 +158,7 @@ def calculate_metrics(df: pd.DataFrame, query_type: str = None) -> str:
 async def get_assistant_response(query: str, context: List[Dict[str, Any]]) -> str:
     """Get assistant response using OpenAI."""
     system_prompt = """You are AMS Clean Assistant, a data analyst for AMS Clean. 
-    Your role is to help answer questions about company data and perform calculations when needed.
+    Your role is to help answer questions about company data and documents.
     
     When analyzing data:
     1. Focus on providing clear, direct answers with specific numbers
@@ -229,6 +226,9 @@ async def get_assistant_response(query: str, context: List[Dict[str, Any]]) -> s
     return response.choices[0].message.content
 
 async def main():
+    # Start the DriveWatcher in the background
+    watcher_task = asyncio.create_task(drive_watcher.check_for_changes())
+    
     st.title("AMS Clean Assistant")
     st.write("Ask me anything about AMS Clean's data and documents.")
     
@@ -259,6 +259,13 @@ async def main():
                 
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
+    
+    # Keep the watcher task running
+    try:
+        await watcher_task
+    except Exception as e:
+        print(f"DriveWatcher error: {e}")
+        print(f"Stack trace: {traceback.format_exc()}")
 
 if __name__ == "__main__":
     asyncio.run(main())
