@@ -1,1 +1,1 @@
-web: python -c "import subprocess, time; subprocess.Popen(['python', 'run_watcher.py']); time.sleep(2); subprocess.call(['streamlit', 'run', 'streamlit_ui.py', '--server.address=0.0.0.0', '--server.port=${PORT:-8501}'])"
+web: python start_all.py
