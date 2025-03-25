@@ -415,22 +415,47 @@ async def insert_chunk(chunk: ProcessedChunk):
         print(f"Error inserting chunk: {e}")
         raise e
 
-async def delete_file_from_database(file_id: str):
+async def delete_file_from_database(file_id: str, file_name: str = None):
     """Delete a file from the database when it's removed from Google Drive."""
     try:
         print(f"Deleting file with ID {file_id} from database")
         
-        # First, find all records with this file ID in the URL
-        url_pattern = f"gdrive://{file_id}"
-        response = supabase.table('site_pages').select('id').eq('url', url_pattern).execute()
+        # If we have the file name, we can try to delete by URL directly
+        if file_name:
+            url_pattern = f"gdrive://{file_name}"
+            print(f"Searching for URL pattern: {url_pattern}")
+            response = supabase.table('site_pages').select('id').eq('url', url_pattern).execute()
+            
+            if response.data:
+                for record in response.data:
+                    # Delete each matching record
+                    delete_response = supabase.table('site_pages').delete().eq('id', record['id']).execute()
+                    print(f"Deleted record with ID {record['id']}")
+                return
         
-        if response.data:
-            for record in response.data:
-                # Delete each matching record
-                delete_response = supabase.table('site_pages').delete().eq('id', record['id']).execute()
-                print(f"Deleted record with ID {record['id']}")
-        else:
-            print(f"No records found with URL {url_pattern}")
+        # If we don't have the file name or didn't find a match, try to find by metadata
+        # Get all gdrive files
+        response = supabase.table('site_pages').select('*').execute()
+        all_data = response.data
+        
+        # Filter to only gdrive files
+        gdrive_data = [
+            item for item in all_data 
+            if item.get('metadata', {}).get('source') == 'gdrive'
+        ]
+        
+        # Look for files with matching file_id in metadata
+        deleted = False
+        for item in gdrive_data:
+            metadata = item.get('metadata', {})
+            if metadata.get('file_id') == file_id:
+                # Delete the record
+                delete_response = supabase.table('site_pages').delete().eq('id', item['id']).execute()
+                print(f"Deleted record with ID {item['id']}")
+                deleted = True
+        
+        if not deleted:
+            print(f"No records found for file ID {file_id}")
             
     except Exception as e:
         print(f"Error deleting file from database: {e}")

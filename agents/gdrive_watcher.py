@@ -106,8 +106,16 @@ class DriveWatcher:
             if deleted_ids:
                 print(f"\nDetected {len(deleted_ids)} deleted files")
                 for file_id in deleted_ids:
+                    # Get the file name from our stored data if possible
+                    file_name = None
+                    # Try to find the file name in our processed_files data
+                    for stored_file in results.get('files', []):
+                        if stored_file['id'] == file_id:
+                            file_name = stored_file['name']
+                            break
+                    
                     # Delete from database
-                    await delete_file_from_database(file_id)
+                    await delete_file_from_database(file_id, file_name)
                     # Remove from processed files
                     del self.processed_files[file_id]
                 self.save_processed_files()
