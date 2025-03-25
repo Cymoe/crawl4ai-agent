@@ -415,6 +415,28 @@ async def insert_chunk(chunk: ProcessedChunk):
         print(f"Error inserting chunk: {e}")
         raise e
 
+async def delete_file_from_database(file_id: str):
+    """Delete a file from the database when it's removed from Google Drive."""
+    try:
+        print(f"Deleting file with ID {file_id} from database")
+        
+        # First, find all records with this file ID in the URL
+        url_pattern = f"gdrive://{file_id}"
+        response = supabase.table('site_pages').select('id').eq('url', url_pattern).execute()
+        
+        if response.data:
+            for record in response.data:
+                # Delete each matching record
+                delete_response = supabase.table('site_pages').delete().eq('id', record['id']).execute()
+                print(f"Deleted record with ID {record['id']}")
+        else:
+            print(f"No records found with URL {url_pattern}")
+            
+    except Exception as e:
+        print(f"Error deleting file from database: {e}")
+        import traceback
+        print(f"Stack trace: {traceback.format_exc()}")
+
 async def list_gdrive_files():
     """List all Google Drive files stored in the database."""
     print("\n=== Files in Database ===")

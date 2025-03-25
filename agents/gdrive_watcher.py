@@ -3,17 +3,18 @@ import time
 import json
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional
-from google.oauth2.service_account import Credentials
+from typing import Dict
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from .crawl_gdrive_docs import process_file
-import traceback
+from googleapiclient.errors import HttpError
+import base64
 
-# If modifying these scopes, delete the file token.json.
+from .crawl_gdrive_docs import process_file, delete_file_from_database
+
+# Google Drive API setup
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = '1PaIeRdrUefDcyrXSYQ-CJlNATIbDZhst'
-PROCESSED_FILES_PATH = 'processed_files.json'
-CHECK_INTERVAL = 30  # 30 seconds for testing
+FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
+CHECK_INTERVAL = 30  # seconds
 
 class DriveWatcher:
     def __init__(self):
@@ -22,40 +23,48 @@ class DriveWatcher:
         print("\n=== DriveWatcher Started ===")
         print(f"Monitoring folder: {FOLDER_ID}")
         print(f"Check interval: {CHECK_INTERVAL} seconds")
-        
+    
     def load_processed_files(self):
         """Load the list of processed files from disk."""
         try:
-            if os.path.exists(PROCESSED_FILES_PATH):
-                with open(PROCESSED_FILES_PATH, 'r') as f:
+            if os.path.exists('processed_files.json'):
+                with open('processed_files.json', 'r') as f:
                     self.processed_files = json.load(f)
-                print(f"\nLoaded {len(self.processed_files)} previously processed files")
+                print(f"Loaded {len(self.processed_files)} processed files from disk")
+            else:
+                print("No processed files found, starting fresh")
         except Exception as e:
             print(f"Error loading processed files: {e}")
-            self.processed_files = {}
     
     def save_processed_files(self):
         """Save the list of processed files to disk."""
         try:
-            with open(PROCESSED_FILES_PATH, 'w') as f:
+            with open('processed_files.json', 'w') as f:
                 json.dump(self.processed_files, f)
-            print(f"Updated processed_files.json ({len(self.processed_files)} files)")
         except Exception as e:
             print(f"Error saving processed files: {e}")
     
     def get_credentials(self):
         """Initialize and return Google Drive credentials using service account."""
         try:
-            # Get the service account key JSON from environment variable
-            service_account_info = json.loads(os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY', '{}'))
-            if not service_account_info:
-                raise ValueError("GOOGLE_SERVICE_ACCOUNT_KEY environment variable not set or invalid")
+            # Get the service account key from environment variable
+            service_account_key = os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY')
+            if not service_account_key:
+                print("Error: GOOGLE_SERVICE_ACCOUNT_KEY environment variable not set")
+                return None
             
-            creds = Credentials.from_service_account_info(
-                service_account_info,
-                scopes=SCOPES
-            )
-            return creds
+            # Decode the base64-encoded service account key
+            try:
+                service_account_info = json.loads(base64.b64decode(service_account_key))
+            except Exception as e:
+                print(f"Error decoding service account key: {e}")
+                return None
+            
+            # Create credentials from the service account info
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info, scopes=SCOPES)
+            
+            return credentials
         except Exception as e:
             print(f"Error getting credentials: {e}")
             return None
@@ -97,20 +106,32 @@ class DriveWatcher:
             if deleted_ids:
                 print(f"\nDetected {len(deleted_ids)} deleted files")
                 for file_id in deleted_ids:
+                    # Delete from database
+                    await delete_file_from_database(file_id)
+                    # Remove from processed files
                     del self.processed_files[file_id]
                 self.save_processed_files()
-                
+            
+            # Wait before checking again
+            await asyncio.sleep(CHECK_INTERVAL)
+            
+            # Recursively check again
+            await self.check_for_changes()
+            
+        except HttpError as error:
+            print(f"HTTP error occurred: {error}")
+            print(f"Stack trace: {traceback.format_exc()}")
+            await asyncio.sleep(CHECK_INTERVAL)
+            await self.check_for_changes()
         except Exception as e:
             print(f"Error checking for changes: {e}")
             print(f"Stack trace: {traceback.format_exc()}")
+            await asyncio.sleep(CHECK_INTERVAL)
+            await self.check_for_changes()
 
 async def main():
     watcher = DriveWatcher()
-    
-    while True:
-        print(f"\n=== Checking for changes at {datetime.now()} ===")
-        await watcher.check_for_changes()
-        await asyncio.sleep(CHECK_INTERVAL)
+    await watcher.check_for_changes()
 
 if __name__ == '__main__':
     asyncio.run(main())
